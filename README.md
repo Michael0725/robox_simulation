@@ -4,6 +4,10 @@
 [`unitree_sdk2_python`](https://github.com/unitreerobotics/unitree_sdk2_python)
 实现的真机部署脚本。
 
+完整的首次真机部署、悬吊验证、停止条件与故障排查请阅读：
+
+- [`deploy/h2/DEPLOY_REAL.md`](deploy/h2/DEPLOY_REAL.md)
+
 > **安全警告**：这是直接发布 H2 `LowCmd` 的低层关节控制程序。第一次运行
 > `passive`、`ready` 和 `policy` 时必须将机器人可靠悬吊、清空运动范围，并安排
 > 一名操作员手持物理急停。不要跳过下面的分阶段检查，也不要第一次就在地面运行。
@@ -13,6 +17,7 @@
 - `deploy/h2/h2_policy_deploy_real.py`：真机部署程序，无 Isaac Sim/Isaac Lab 依赖。
 - `deploy/h2/policy.onnx`：在 Isaac Sim 中验证过的策略，来自训练目录
   `2026-08-14_08-46-32_resume_to_20000`。
+- `deploy/h2/DEPLOY_REAL.md`：H2 首次真机部署与悬吊验证作业指导书。
 
 模型 SHA-256：
 
