@@ -1,0 +1,38 @@
+# H2 stand-only policy default joint positions (radians).
+# Source: robust median of measured q from locomotion_0826.npz, t=2..20 s.
+# Format: one float per line; comments are accepted by numpy.loadtxt().
+# Order: policy observation order (OBS_JOINT_NAMES in h2_policy_deploy_real.py).
+# IMPORTANT: this is not Unitree SDK motor order. Head joints (SDK 29,30)
+# appear at policy indices 15,16, before the arm joints.
+# policy_idx  joint_name                         sdk_idx
+ 0.08973792  # 00  left_hip_pitch_joint              00
+ 0.01409346  # 01  left_hip_roll_joint               01
+ 0.11282749  # 02  left_hip_yaw_joint                02
+ 0.09385517  # 03  left_knee_joint                   03
+-0.03112948  # 04  left_ankle_roll_joint             04
+-0.08534304  # 05  left_ankle_pitch_joint            05
+ 0.06524213  # 06  right_hip_pitch_joint             06
+-0.04526874  # 07  right_hip_roll_joint              07
+-0.10875290  # 08  right_hip_yaw_joint               08
+ 0.15278557  # 09  right_knee_joint                  09
+ 0.04298834  # 10  right_ankle_roll_joint            10
+-0.00317534  # 11  right_ankle_pitch_joint           11
+ 0.00071586  # 12  waist_yaw_joint                   12
+-0.00624758  # 13  waist_roll_joint                  13
+ 0.05641541  # 14  waist_pitch_joint                 14
+ 0.00387532  # 15  head_pitch_joint                  29
+ 0.00136242  # 16  head_yaw_joint                    30
+ 0.01561252  # 17  left_shoulder_pitch_joint         15
+ 0.38039130  # 18  left_shoulder_roll_joint          16
+-0.42488873  # 19  left_shoulder_yaw_joint           17
+ 1.11163878  # 20  left_elbow_joint                  18
+ 0.00314586  # 21  left_wrist_roll_joint             19
+-0.00130628  # 22  left_wrist_pitch_joint            20
+-0.00668720  # 23  left_wrist_yaw_joint              21
+-0.00203679  # 24  right_shoulder_pitch_joint        22
+-0.36717868  # 25  right_shoulder_roll_joint         23
+ 0.48822537  # 26  right_shoulder_yaw_joint          24
+ 1.03964353  # 27  right_elbow_joint                 25
+-0.00431432  # 28  right_wrist_roll_joint            26
+ 0.01217597  # 29  right_wrist_pitch_joint           27
+ 0.00408662  # 30  right_wrist_yaw_joint             28
