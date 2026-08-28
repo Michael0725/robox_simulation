@@ -62,13 +62,25 @@ OBS_TO_SDK = np.asarray(
 # The policy action order is exactly SDK motors 0..28.
 ACTION_TO_SDK = np.arange(POLICY_ACTION_DIM, dtype=np.int64)
 
+# Default joint positions in policy observation order (OBS_TO_SDK), rad.
+# Loaded from deploy/h2/default_q.para: robust median of measured q from
+# locomotion_0826.npz, t=2..20 s (new model's default pose).
+# Old policy-order default pose (h2_ankle_swing_example / previous training):
+#     -0.25, 0.0, 0.0, 0.50, 0.0, -0.25,
+#     -0.25, 0.0, 0.0, 0.50, 0.0, -0.25,
+#     0.0, 0.0, 0.0, 0.0, 0.0,
+#     0.35, 0.18, 0.0, 0.87, 0.0, 0.0, 0.0,
+#     0.35, -0.18, 0.0, 0.87, 0.0, 0.0, 0.0,
 DEFAULT_Q_31 = np.asarray(
     [
-        -0.25, 0.0, 0.0, 0.50, 0.0, -0.25,
-        -0.25, 0.0, 0.0, 0.50, 0.0, -0.25,
-        0.0, 0.0, 0.0, 0.0, 0.0,
-        0.35, 0.18, 0.0, 0.87, 0.0, 0.0, 0.0,
-        0.35, -0.18, 0.0, 0.87, 0.0, 0.0, 0.0,
+        0.08973792, 0.01409346, 0.11282749, 0.09385517, -0.03112948, -0.08534304,
+        0.06524213, -0.04526874, -0.10875290, 0.15278557, 0.04298834, -0.00317534,
+        0.00071586, -0.00624758, 0.05641541,
+        0.00387532, 0.00136242,
+        0.01561252, 0.38039130, -0.42488873, 1.11163878, 0.00314586, -0.00130628,
+        -0.00668720,
+        -0.00203679, -0.36717868, 0.48822537, 1.03964353, -0.00431432, 0.01217597,
+        0.00408662,
     ],
     dtype=np.float32,
 )
@@ -84,26 +96,29 @@ ACTION_SCALE = np.asarray(
     dtype=np.float32,
 )
 
-# Training PD gains in H2 SDK motor order (legs, waist, arms, head).
+# PD gains in H2 SDK motor order (legs, waist, arms, head).
+# These are the gains actually commanded by the stock Unitree locomotion
+# policy, read from locomotion_0826.npz (kp_cmd/kd_cmd, constant over the
+# whole log, mode=1). Replaces the old h2_ankle_swing_example training table.
 TRAINING_KP = np.asarray(
     [
-        200, 200, 200, 200, 40, 40,
-        200, 200, 200, 200, 40, 40,
-        150, 150, 150,
-        40, 40, 40, 40, 40, 20, 20,
-        40, 40, 40, 40, 40, 20, 20,
-        220, 220,
+        300, 300, 300, 300, 60, 60,
+        300, 300, 300, 300, 60, 60,
+        300, 300, 300,
+        100, 100, 100, 100, 40, 40, 40,
+        100, 100, 100, 100, 40, 40, 40,
+        80, 80,
     ],
     dtype=np.float32,
 )
 TRAINING_KD = np.asarray(
     [
-        4, 4, 4, 4, 2, 2,
-        4, 4, 4, 4, 2, 2,
-        3, 3, 3,
-        2, 2, 2, 2, 2, 1, 1,
-        2, 2, 2, 2, 2, 1, 1,
-        12, 12,
+        5.0, 5.0, 5.0, 5.0, 3.0, 3.0,
+        5.0, 5.0, 5.0, 5.0, 3.0, 3.0,
+        5.0, 5.0, 5.0,
+        3.0, 3.0, 3.0, 3.0, 2.0, 2.0, 2.0,
+        3.0, 3.0, 3.0, 3.0, 2.0, 2.0, 2.0,
+        3.0, 3.0,
     ],
     dtype=np.float32,
 )
@@ -155,6 +170,30 @@ def policy_to_sdk_q(q_policy_order: np.ndarray) -> np.ndarray:
 
 
 DEFAULT_Q_SDK = policy_to_sdk_q(DEFAULT_Q_31)
+
+
+def load_loco_stand_q_sdk(npz_path: str, start: float, end: float) -> np.ndarray:
+    """Load a straight low-torque standing pose from a logged H2 NPZ."""
+    data = np.load(os.path.abspath(npz_path), allow_pickle=False)
+    if "t" not in data.files or "q" not in data.files:
+        raise RuntimeError(f"Stand NPZ must contain t/q, has {data.files}")
+    t = np.asarray(data["t"], dtype=np.float64)
+    q = np.asarray(data["q"], dtype=np.float32)
+    if q.ndim != 2 or q.shape[1] != H2_NUM_MOTORS:
+        raise RuntimeError(f"Stand NPZ q must be [N,31], got {q.shape}")
+    n = min(len(t), len(q))
+    if n <= 0:
+        raise RuntimeError("Stand NPZ has no aligned t/q samples")
+    t = t[:n]
+    q = q[:n]
+    mask = (t >= start) & (t <= end)
+    if not np.any(mask):
+        raise RuntimeError(f"No stand samples in [{start}, {end}] for {npz_path}")
+    q_sdk = q[mask].mean(axis=0).astype(np.float32)
+    if not np.isfinite(q_sdk).all():
+        raise RuntimeError("Stand pose contains NaN/Inf")
+    return np.clip(q_sdk, SDK_Q_MIN + 0.02, SDK_Q_MAX - 0.02).astype(np.float32)
+
 
 # Exact name-mapped joint pose used by the Isaac validation script: frame 100,
 # the minimum-velocity frame in step_rotate_idle_000_002__A026.npz.  It is
@@ -726,16 +765,26 @@ def run_robot(args: argparse.Namespace) -> int:
     robot.set_passive(snapshot)
     robot.start_writer()
 
-    gain_scale = float(args.gain_scale)
-    kp = TRAINING_KP * gain_scale
-    kd = TRAINING_KD * gain_scale
-    ready_q = (
-        DEFAULT_Q_SDK.copy()
-        if args.ready_pose == "default"
-        else VALIDATED_MOTION_READY_Q_SDK.copy()
+    gain_scale = 0.35 if args.gain_scale is None else float(args.gain_scale)
+    kp_scale = gain_scale if args.kp_scale is None else float(args.kp_scale)
+    kd_scale = gain_scale if args.kd_scale is None else float(args.kd_scale)
+    kp = TRAINING_KP * kp_scale
+    kd = TRAINING_KD * kd_scale
+    print(f"H2_GAINS kp_scale={kp_scale:.3f} kd_scale={kd_scale:.3f}")
+    if args.stand_assist and args.ready_pose != "loco-stand":
+        raise RuntimeError("--stand-assist requires --ready-pose loco-stand")
+    if args.ready_pose == "default":
+        ready_q = DEFAULT_Q_SDK.copy()
+    elif args.ready_pose == "validated-motion":
+        ready_q = VALIDATED_MOTION_READY_Q_SDK.copy()
+    else:
+        ready_q = load_loco_stand_q_sdk(args.stand_npz, args.stand_start, args.stand_end)
+    print(
+        f"H2_READY_POSE source={args.ready_pose} "
+        f"knee_sdk={ready_q[3]:.3f},{ready_q[9]:.3f}"
     )
-    print(f"H2_READY_POSE source={args.ready_pose}")
     started_at = time.monotonic()
+    action_rows: list[tuple[float, np.ndarray, np.ndarray, np.ndarray, float, float, int]] = []
 
     try:
         if args.mode == "passive":
@@ -819,6 +868,20 @@ def run_robot(args: argparse.Namespace) -> int:
                 raise RuntimeError(f"ONNX inference deadline miss: {inference_ms:.2f} ms")
 
             target_29 = ACTION_DEFAULT_Q + ACTION_SCALE * action
+            if args.stand_assist:
+                base_29 = ready_q[:POLICY_ACTION_DIM]
+                delta = np.clip(
+                    target_29 - base_29,
+                    -args.stand_delta_max,
+                    args.stand_delta_max,
+                ).astype(np.float32)
+                target_29 = (base_29 + delta).astype(np.float32)
+                knee_delta = max(abs(float(delta[3])), abs(float(delta[9])))
+                if knee_delta > args.abort_knee_delta:
+                    raise RuntimeError(
+                        f"Stand-assist knee delta {knee_delta:.3f} exceeds "
+                        f"{args.abort_knee_delta:.3f}"
+                    )
             desired_target = current_target.copy()
             desired_target[ACTION_TO_SDK] = target_29
             desired_target[29:31] = DEFAULT_Q_SDK[29:31]
@@ -831,6 +894,17 @@ def run_robot(args: argparse.Namespace) -> int:
             # Match Isaac: observation contains the raw previous ONNX action.
             last_action = action.copy()
             completed_steps += 1
+
+            if args.log_actions:
+                action_rows.append((
+                    now - policy_started,
+                    action.copy(),
+                    current_target.copy(),
+                    command.copy(),
+                    float(-gravity[2]),
+                    float(np.max(np.abs(current_target - snapshot.q_sdk))),
+                    int(saturated),
+                ))
 
             if now >= next_print:
                 tracking_error = float(np.max(np.abs(current_target - snapshot.q_sdk)))
@@ -870,6 +944,25 @@ def run_robot(args: argparse.Namespace) -> int:
     finally:
         print("Entering passive damping before shutdown...")
         robot.stop_writer(args.passive_grace)
+        if args.log_actions and action_rows:
+            save_path = Path(args.log_actions)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                save_path,
+                t=np.asarray([r[0] for r in action_rows], dtype=np.float64),
+                raw_action=np.asarray([r[1] for r in action_rows], dtype=np.float32),
+                target_q=np.asarray([r[2] for r in action_rows], dtype=np.float32),
+                cmd=np.asarray([r[3] for r in action_rows], dtype=np.float32),
+                upright=np.asarray([r[4] for r in action_rows], dtype=np.float32),
+                tracking_error=np.asarray([r[5] for r in action_rows], dtype=np.float32),
+                saturated=np.asarray([r[6] for r in action_rows], dtype=np.uint8),
+                kp_cmd=kp.astype(np.float32),
+                kd_cmd=kd.astype(np.float32),
+            )
+            print(
+                f"H2_ACTIONS_SAVED {save_path} frames={len(action_rows)} "
+                f"kp[3]={kp[3]:.3f} kd[3]={kd[3]:.3f}"
+            )
 
 
 def parse_args() -> argparse.Namespace:
@@ -898,16 +991,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ready-duration", type=float, default=5.0)
     parser.add_argument(
         "--ready-pose",
-        choices=("default", "validated-motion"),
+        choices=("default", "validated-motion", "loco-stand"),
         default="default",
         help=(
             "default is the conservative first test; validated-motion is the exact "
-            "minimum-velocity motion pose used to initialize Isaac validation"
+            "minimum-velocity motion pose used to initialize Isaac validation; "
+            "loco-stand loads a straight standing mean pose from --stand-npz"
         ),
     )
+    parser.add_argument("--stand-npz", default=str(script_dir / "loco_stand.npz"))
+    parser.add_argument("--stand-start", type=float, default=10.0)
+    parser.add_argument("--stand-end", type=float, default=20.0)
     parser.add_argument(
-        "--gain-scale", type=float, default=0.35,
-        help="Scale training Kp/Kd; start suspended at 0.35 and tune deliberately",
+        "--stand-assist",
+        action="store_true",
+        help="Limit policy output to small deltas around the loco-stand ready pose",
+    )
+    parser.add_argument("--stand-delta-max", type=float, default=0.10)
+    parser.add_argument("--abort-knee-delta", type=float, default=0.15)
+    parser.add_argument(
+        "--gain-scale", type=float, default=None,
+        help="Scale training Kp/Kd together (default 0.35); --kp-scale/--kd-scale override it",
+    )
+    parser.add_argument(
+        "--kp-scale", type=float, default=None,
+        help="Scale training Kp only, in (0, 1]; overrides --gain-scale for Kp",
+    )
+    parser.add_argument(
+        "--kd-scale", type=float, default=None,
+        help="Scale training Kd only, in (0, 2]; overrides --gain-scale for Kd",
     )
     parser.add_argument("--command-accel", type=float, default=1.5)
     parser.add_argument("--yaw-accel", type=float, default=3.0)
@@ -921,6 +1033,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-upright", type=float, default=0.5)
     parser.add_argument("--print-interval", type=float, default=1.0)
     parser.add_argument("--passive-grace", type=float, default=0.5)
+    parser.add_argument(
+        "--log-actions", type=str, default=None, metavar="NPZ",
+        help="Save per-step policy debug to NPZ: t, raw_action(29), target_q(31), "
+             "cmd(3), upright, tracking_error, saturated, kp_cmd, kd_cmd",
+    )
     parser.add_argument("--disable-remote-estop", action="store_true")
     parser.add_argument("--enable-low-level", action="store_true")
     parser.add_argument("--confirm-suspended", action="store_true")
@@ -943,8 +1060,12 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "--duration, --passive-grace, and --tracking-error-grace must be non-negative"
         )
-    if not 0 < args.gain_scale <= 1.0:
+    if args.gain_scale is not None and not 0 < args.gain_scale <= 1.0:
         parser.error("--gain-scale must be in (0, 1]")
+    if args.kp_scale is not None and not 0 < args.kp_scale <= 1.0:
+        parser.error("--kp-scale must be in (0, 1]")
+    if args.kd_scale is not None and not 0 < args.kd_scale <= 2.0:
+        parser.error("--kd-scale must be in (0, 2]")
     if not 0 < args.min_upright <= 1.0:
         parser.error("--min-upright must be in (0, 1]")
     command = np.asarray([args.vx, args.vy, args.wz], dtype=np.float32)
